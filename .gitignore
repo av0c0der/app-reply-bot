@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Credentials
+*.p8
+*.json
+!package.json
+!tsconfig.json
+
+# Generated migrations (templates are in migrations-templates/)
+supabase/migrations/
