@@ -44,6 +44,19 @@ interface AppStoreApp {
     };
 }
 
+interface AppStoreVersion {
+    id: string;
+    type: 'appStoreVersions';
+    attributes: {
+        appStoreState: string;
+        versionString?: string;
+    };
+}
+
+interface AppStoreVersionsResponse {
+    data: AppStoreVersion[];
+}
+
 interface AppStoreAppsResponse {
     data: AppStoreApp[];
     links?: {
@@ -219,6 +232,43 @@ export class AppStoreClient {
 
         logger.debug('fetchReviews completed', { totalReviews: reviews.length, pages: pageCount });
         return reviews.slice(0, limit);
+    }
+
+    /**
+     * Check if an app has a published (Ready for Sale) version
+     */
+    async isAppReadyForSale(
+        account: Account,
+        storeId: string
+    ): Promise<{ ready: boolean; state?: string }> {
+        logger.debug('isAppReadyForSale called', { accountId: account.id, storeId });
+
+        if (!account.is_valid) {
+            throw new Error('Account credentials are invalid. Please re-upload your .p8 file.');
+        }
+
+        if (!account.apple_key_id || !account.apple_issuer_id) {
+            throw new Error('Missing Apple Key ID or Issuer ID');
+        }
+
+        const token = this.generateToken(account.credential_data, account.apple_key_id, account.apple_issuer_id);
+
+        try {
+            const response = await this.request<AppStoreVersionsResponse>(
+                `/apps/${storeId}/appStoreVersions?limit=1&sort=-versionString&fields[appStoreVersions]=appStoreState,versionString`,
+                token
+            );
+
+            const latestState = response.data?.[0]?.attributes?.appStoreState;
+            const ready = latestState === 'READY_FOR_SALE';
+
+            logger.debug('isAppReadyForSale result', { storeId, state: latestState, ready });
+            return { ready, state: latestState };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            logger.error('Failed to check app availability', { storeId, error: errorMessage });
+            return { ready: false, state: undefined };
+        }
     }
 
     /**

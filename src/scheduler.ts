@@ -197,6 +197,18 @@ export class ReviewScheduler {
             return 0;
         }
 
+        // Skip apps that are not published (e.g., drafts or removed from sale)
+        if (app.store === 'app_store') {
+            const availability = await appStoreClient.isAppReadyForSale(account, app.store_id);
+            if (!availability.ready) {
+                logger.debug(`Skipping app ${app.name} - not ready for sale`, {
+                    appId: app.id,
+                    appStoreState: availability.state,
+                });
+                return 0;
+            }
+        }
+
         let newReviewCount = 0;
 
         // Parse last poll timestamp if available
