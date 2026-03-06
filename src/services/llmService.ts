@@ -6,7 +6,7 @@
 import OpenAI from 'openai';
 import { llmLogger as logger } from '../utils/logger';
 
-const DEFAULT_MODEL = 'anthropic/claude-opus-4.5';
+const DEFAULT_MODEL = 'anthropic/claude-opus-4.6';
 
 interface GenerateResponseOptions {
     appName: string;
