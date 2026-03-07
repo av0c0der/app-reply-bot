@@ -15,7 +15,7 @@ interface GenerateResponseOptions {
     reviewBody: string;
     reviewerName?: string;
     store: 'app_store' | 'play_store';
-    maxLength?: number; // Play Store has 350 char limit
+    maxLength?: number; // Play Store: 350, App Store: 5970
     customInstructions?: string;
 }
 
@@ -67,7 +67,7 @@ class LLMService {
             reviewBody,
             reviewerName,
             store,
-            maxLength = store === 'play_store' ? 350 : 5000,
+            maxLength = store === 'play_store' ? 350 : 5970,
             customInstructions,
         } = options;
 

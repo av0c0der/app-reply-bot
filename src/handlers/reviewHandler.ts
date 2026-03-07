@@ -12,6 +12,10 @@ import { reviewLogger as logger } from '../utils/logger';
 import { RateLimiter } from '../utils/rateLimiter';
 
 const GENERATING_RESPONSE_TEXT = 'Response is being generated...';
+const STORE_CHAR_LIMITS: Record<string, number> = {
+    app_store: 5970,
+    play_store: 350,
+};
 const GENERATE_LIMIT_PER_HOUR = parseInt(process.env.GENERATE_LIMIT_PER_HOUR || '30', 10);
 const generateLimiter = new RateLimiter(GENERATE_LIMIT_PER_HOUR, 60 * 60 * 1000);
 
@@ -585,6 +589,9 @@ export async function handleEditResponse(ctx: Context, reviewId: string): Promis
     const stars = '⭐'.repeat(review.rating) + '☆'.repeat(5 - review.rating);
     const currentResponse = response.final_text || response.ai_generated_text;
 
+    const charLimit = STORE_CHAR_LIMITS[review.store] || 5970;
+    const storeName = review.store === 'app_store' ? 'App Store' : 'Google Play';
+
     await ctx.reply(
         '✏️ <b>Edit Response</b>\n\n' +
         `<b>${escapeHtml(app.name)} (${storeLabel})</b>\n` +
@@ -593,7 +600,7 @@ export async function handleEditResponse(ctx: Context, reviewId: string): Promis
         `<blockquote>${escapeHtml(review.body)}</blockquote>\n\n` +
         '💬 <b>Current response:</b>\n' +
         `<blockquote>${escapeHtml(currentResponse)}</blockquote>\n\n` +
-        '📝 Reply to this message with your edited response:',
+        `📝 Reply to this message with your edited response (${storeName} limit: <b>${charLimit}</b> characters):`,
         {
             parse_mode: 'HTML',
             reply_markup: {
@@ -620,6 +627,18 @@ export async function handleCustomResponse(
     if (!review) {
         logger.warn('Review not found', { reviewId });
         await ctx.reply('❌ Review not found.');
+        return;
+    }
+
+    const charLimit = STORE_CHAR_LIMITS[review.store] || 5970;
+    if (customText.length > charLimit) {
+        const storeName = review.store === 'app_store' ? 'App Store' : 'Google Play';
+        await ctx.reply(
+            `⚠️ Your response is <b>${customText.length}</b> characters, ` +
+            `but ${storeName} allows a maximum of <b>${charLimit}</b> characters.\n\n` +
+            `Please shorten your response by <b>${customText.length - charLimit}</b> characters and try again.`,
+            { parse_mode: 'HTML' }
+        );
         return;
     }
 
@@ -1384,13 +1403,16 @@ export async function handleIteratorWrite(ctx: Context, reviewId: string): Promi
     const storeLabel = review.store === 'app_store' ? 'iOS' : 'Android';
     const stars = '⭐'.repeat(review.rating) + '☆'.repeat(5 - review.rating);
 
+    const charLimit = STORE_CHAR_LIMITS[review.store] || 5970;
+    const storeName = review.store === 'app_store' ? 'App Store' : 'Google Play';
+
     await ctx.reply(
         '✏️ <b>Write Your Response</b>\n\n' +
         `<b>${escapeHtml(app.name)} (${storeLabel})</b>\n` +
         `${stars} by ${escapeHtml(review.reviewer_name || 'Anonymous')}\n\n` +
         (review.title ? `<b>"${escapeHtml(review.title)}"</b>\n` : '') +
         `<blockquote>${escapeHtml(review.body)}</blockquote>\n\n` +
-        '📝 Reply to this message with your response:',
+        `📝 Reply to this message with your response (${storeName} limit: <b>${charLimit}</b> characters):`,
         {
             parse_mode: 'HTML',
             reply_markup: {

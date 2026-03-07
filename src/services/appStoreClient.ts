@@ -338,13 +338,20 @@ export class AppStoreClient {
         issuerId: string
     ): Promise<void> {
         logger.debug('postResponse called', { reviewId, responseLength: responseBody.length });
+
+        // Enforce App Store 5,970 character limit
+        const truncatedResponse = responseBody.slice(0, 5970);
+        if (responseBody.length > 5970) {
+            logger.debug('Response truncated to 5970 characters');
+        }
+
         const token = this.generateToken(privateKey, keyId, issuerId);
 
         const body = {
             data: {
                 type: 'customerReviewResponses',
                 attributes: {
-                    responseBody: responseBody,
+                    responseBody: truncatedResponse,
                 },
                 relationships: {
                     review: {
