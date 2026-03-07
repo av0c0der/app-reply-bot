@@ -6,9 +6,10 @@
 
 import cron from 'node-cron';
 import { Telegraf } from 'telegraf';
-import { supabase, AppWithAccount, User } from './services/supabase';
+import { supabase, AppWithAccount, Review, User } from './services/supabase';
 import { appStoreClient, ParsedAppStoreReview } from './services/appStoreClient';
 import { playStoreClient, ParsedPlayStoreReview } from './services/playStoreClient';
+import { sendReviewNotificationToChat } from './handlers/reviewHandler';
 import { schedulerLogger as logger } from './utils/logger';
 
 type ParsedReview = ParsedAppStoreReview | ParsedPlayStoreReview;
@@ -68,10 +69,10 @@ export class ReviewScheduler {
                 continue;
             }
 
-            const newCount = await this.pollAppReviews(appWithAccount, user);
+            const newReviews = await this.pollAppReviews(appWithAccount, user);
             results.push({
                 appName: app.name,
-                newReviews: newCount,
+                newReviews: newReviews.length,
             });
         }
 
@@ -90,6 +91,7 @@ export class ReviewScheduler {
 
         const interval = this.config.pollIntervalMinutes;
         logger.info(`Starting scheduler with ${interval} minute interval`);
+        this.isRunning = true;
 
         // Run immediately on start
         logger.debug('Running initial poll...');
@@ -105,9 +107,11 @@ export class ReviewScheduler {
             this.pollAllApps().catch((error) => {
                 logger.error('Poll error:', error);
             });
+        }, {
+            scheduled: false,
         });
 
-        this.isRunning = true;
+        this.cronJob.start();
         logger.info('Scheduler started successfully');
     }
 
@@ -156,22 +160,45 @@ export class ReviewScheduler {
 
             // Poll each user's apps
             for (const [userId, { user, apps: userAppList }] of userApps) {
+                const preferences = await supabase.getUserPreferences(userId);
+                const notificationsEnabled = preferences?.preferences?.notification_enabled ?? true;
                 let totalNewReviews = 0;
+                let notificationCount = 0;
 
                 for (const app of userAppList) {
                     try {
                         logger.debug(`Polling app: ${app.name}`, { appId: app.id });
-                        const newCount = await this.pollAppReviews(app, user);
-                        totalNewReviews += newCount;
+                        const newReviews = await this.pollAppReviews(app, user);
+                        totalNewReviews += newReviews.length;
+
+                        if (!notificationsEnabled) {
+                            continue;
+                        }
+
+                        for (const review of newReviews) {
+                            try {
+                                await sendReviewNotificationToChat(
+                                    this.bot.telegram,
+                                    user.telegram_id,
+                                    user.id,
+                                    review,
+                                    app
+                                );
+                                notificationCount++;
+                            } catch (error) {
+                                logger.error(`Failed to notify user about review ${review.id}:`, error);
+                            }
+                        }
                     } catch (error) {
                         logger.error(`Error polling app ${app.name}:`, error);
                     }
                 }
 
-                // Send summary if there are new reviews
                 if (totalNewReviews > 0) {
-                    logger.info(`Found ${totalNewReviews} new reviews for user ${userId}`);
-                    await this.sendSummaryNotification(user.telegram_id, totalNewReviews);
+                    logger.info(`Found ${totalNewReviews} new reviews for user ${userId}`, {
+                        notificationsEnabled,
+                        notificationsSent: notificationCount,
+                    });
                 }
             }
 
@@ -186,15 +213,15 @@ export class ReviewScheduler {
 
     /**
      * Poll reviews for a single app
-     * Returns the number of new reviews saved
+     * Returns the new reviews saved during this poll
      */
-    private async pollAppReviews(app: AppWithAccount, user: User): Promise<number> {
+    private async pollAppReviews(app: AppWithAccount, user: User): Promise<Review[]> {
         logger.debug(`pollAppReviews called for ${app.name}`, { appId: app.id, store: app.store, lastPollAt: app.last_poll_at });
 
         const account = app.account;
         if (!account || !account.is_valid) {
             logger.debug(`Skipping app ${app.name} - no valid account`);
-            return 0;
+            return [];
         }
 
         // Skip apps that are not published (e.g., drafts or removed from sale)
@@ -205,11 +232,11 @@ export class ReviewScheduler {
                     appId: app.id,
                     appStoreState: availability.state,
                 });
-                return 0;
+                return [];
             }
         }
 
-        let newReviewCount = 0;
+        const newReviews: Review[] = [];
 
         // Parse last poll timestamp if available
         const lastPollAt = app.last_poll_at ? new Date(app.last_poll_at) : undefined;
@@ -229,7 +256,9 @@ export class ReviewScheduler {
 
             for (const review of reviews) {
                 const saved = await this.saveReview(review, app, user);
-                if (saved) newReviewCount++;
+                if (saved) {
+                    newReviews.push(saved);
+                }
             }
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -245,25 +274,25 @@ export class ReviewScheduler {
         logger.debug(`Updating last poll time for ${app.name}`);
         await supabase.updateAppLastPoll(app.id);
 
-        return newReviewCount;
+        return newReviews;
     }
 
     /**
      * Save a single review to the database (no AI generation)
-     * Returns true if the review was saved (new), false if it already existed
+     * Returns the saved review when it is new
      */
     private async saveReview(
         review: ParsedReview,
         app: AppWithAccount,
         user: User
-    ): Promise<boolean> {
+    ): Promise<Review | null> {
         logger.debug('saveReview called', { externalId: review.externalId, store: app.store, appName: app.name });
 
         // Check if we've already processed this review
         const existingReview = await supabase.getReviewByExternalId(app.store, review.externalId);
         if (existingReview) {
             logger.debug('Review already exists, skipping', { externalId: review.externalId });
-            return false; // Skip already processed reviews
+            return null;
         }
 
         // Create review record
@@ -290,7 +319,7 @@ export class ReviewScheduler {
 
         if (!savedReview) {
             logger.debug('Review was duplicate, not saved', { externalId: review.externalId });
-            return false; // Review already existed (duplicate)
+            return null;
         }
 
         logger.info(`New ${app.store} review saved: ${savedReview.id} (${review.rating} stars)`, {
@@ -299,29 +328,7 @@ export class ReviewScheduler {
             store: app.store,
             appName: app.name,
         });
-        return true;
-    }
-
-    /**
-     * Send summary notification about new reviews
-     */
-    private async sendSummaryNotification(
-        telegramId: number,
-        newReviewCount: number
-    ): Promise<void> {
-        logger.debug('Sending summary notification', { telegramId, newReviewCount });
-        try {
-            const reviewWord = newReviewCount === 1 ? 'review' : 'reviews';
-            await this.bot.telegram.sendMessage(
-                telegramId,
-                `📬 <b>${newReviewCount} new ${reviewWord}</b>\n\n` +
-                `Use /review to go through them.`,
-                { parse_mode: 'HTML' }
-            );
-            logger.debug('Summary notification sent successfully');
-        } catch (error) {
-            logger.error(`Failed to send summary notification to ${telegramId}:`, error);
-        }
+        return savedReview;
     }
 
     /**

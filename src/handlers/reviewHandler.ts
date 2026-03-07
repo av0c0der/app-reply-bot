@@ -3,7 +3,7 @@
  * Handles review notifications, approval workflow, and response posting
  */
 
-import { Context, Markup } from 'telegraf';
+import { Context, Markup, Telegram } from 'telegraf';
 import { supabase, Review, App, AppWithAccount, Response } from '../services/supabase';
 import { llmService } from '../services/llmService';
 import { appStoreClient } from '../services/appStoreClient';
@@ -304,19 +304,27 @@ export async function sendReviewNotification(
     const chatId = ctx.chat?.id;
     if (!chatId) return;
 
+    await sendReviewNotificationToChat(ctx.telegram, chatId, review.user_id, review, app, response);
+}
+
+export async function sendReviewNotificationToChat(
+    telegram: Telegram,
+    chatId: number,
+    userId: string,
+    review: Review,
+    app: App,
+    response?: Response
+): Promise<void> {
     const message = buildReviewMessage(review, app, response, llmService.getModel());
     const keyboard = buildReviewKeyboard(review.id, !!response);
 
-    const sent = await ctx.reply(message, {
+    const sent = await telegram.sendMessage(chatId, message, {
         parse_mode: 'HTML',
         ...keyboard,
     });
 
     // Save telegram message for later updates
-    const user = await supabase.getUserByTelegramId(ctx.from!.id);
-    if (user) {
-        await supabase.saveTelegramMessage(review.id, user.id, chatId, sent.message_id);
-    }
+    await supabase.saveTelegramMessage(review.id, userId, chatId, sent.message_id);
 
     // Update review status
     await supabase.updateReviewStatus(review.id, 'notified');
