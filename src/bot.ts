@@ -205,7 +205,8 @@ function registerCommands(bot: Telegraf<BotContext>): void {
 
             for (const result of results) {
                 const emoji = result.newReviews > 0 ? '🆕' : '📭';
-                message += `${emoji} <b>${escapeHtml(result.appName)}</b>: ${result.newReviews} new review(s)\n`;
+                const platformLabel = result.store === 'app_store' ? 'iOS' : 'Android';
+                message += `${emoji} <b>${escapeHtml(result.appName)}</b> (${platformLabel}): ${result.newReviews} new review(s)\n`;
                 totalNew += result.newReviews;
             }
 

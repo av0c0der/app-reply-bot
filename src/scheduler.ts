@@ -48,9 +48,9 @@ export class ReviewScheduler {
      * Manually trigger a poll for a specific user's apps
      * Returns the number of new reviews found
      */
-    async pollUserApps(userId: string): Promise<{ appName: string; newReviews: number }[]> {
+    async pollUserApps(userId: string): Promise<{ appName: string; store: string; newReviews: number }[]> {
         logger.debug('pollUserApps called', { userId });
-        const results: { appName: string; newReviews: number }[] = [];
+        const results: { appName: string; store: string; newReviews: number }[] = [];
 
         const user = await supabase.getUserById(userId);
         if (!user) {
@@ -72,6 +72,7 @@ export class ReviewScheduler {
             const newReviews = await this.pollAppReviews(appWithAccount, user);
             results.push({
                 appName: app.name,
+                store: app.store,
                 newReviews: newReviews.length,
             });
         }
