@@ -14,7 +14,7 @@ import {
     validateAppleIssuerId,
     validateGoogleServiceAccount,
 } from '../services/credentialValidator';
-import { triggerUserPoll } from '../bot';
+import { triggerUserPoll, formatPollResults } from '../bot';
 
 interface AccountWizardSession extends Scenes.WizardSessionData {
     accountType?: 'app_store_connect' | 'google_play';
@@ -278,8 +278,13 @@ const processAppleIssuerId = async (ctx: AccountContext) => {
             { parse_mode: 'HTML' }
         );
 
-        // Trigger initial poll for new reviews
-        triggerUserPoll(user.id).catch(() => { /* ignore errors */ });
+        try {
+            const results = await triggerUserPoll(user.id);
+            await ctx.reply(formatPollResults(results), { parse_mode: 'HTML' });
+        } catch (pollError) {
+            const msg = pollError instanceof Error ? pollError.message : 'Unknown error';
+            await ctx.reply(`⚠️ Initial review fetch failed: ${msg}`);
+        }
 
         return ctx.scene.leave();
     } catch (error) {
@@ -382,8 +387,13 @@ const processPackageNames = async (ctx: AccountContext) => {
             { parse_mode: 'HTML' }
         );
 
-        // Trigger initial poll for new reviews
-        triggerUserPoll(user.id).catch(() => { /* ignore errors */ });
+        try {
+            const results = await triggerUserPoll(user.id);
+            await ctx.reply(formatPollResults(results), { parse_mode: 'HTML' });
+        } catch (pollError) {
+            const msg = pollError instanceof Error ? pollError.message : 'Unknown error';
+            await ctx.reply(`⚠️ Initial review fetch failed: ${msg}`);
+        }
 
         return ctx.scene.leave();
     } catch (error) {

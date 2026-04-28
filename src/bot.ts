@@ -70,10 +70,29 @@ let scheduler: ReviewScheduler | null = null;
  * Trigger a poll for a specific user's apps
  * Can be called from scenes after account setup
  */
-export async function triggerUserPoll(userId: string): Promise<void> {
-    if (scheduler) {
-        await scheduler.pollUserApps(userId);
+export async function triggerUserPoll(
+    userId: string,
+): Promise<{ appName: string; store: string; newReviews: number }[]> {
+    if (!scheduler) return [];
+    return scheduler.pollUserApps(userId);
+}
+
+export function formatPollResults(
+    results: { appName: string; store: string; newReviews: number }[],
+): string {
+    if (results.length === 0) {
+        return '📭 No apps to poll yet.';
     }
+    let message = '✅ <b>Poll Complete</b>\n\n';
+    let totalNew = 0;
+    for (const result of results) {
+        const emoji = result.newReviews > 0 ? '🆕' : '📭';
+        const platformLabel = result.store === 'app_store' ? 'iOS' : 'Android';
+        message += `${emoji} <b>${escapeHtml(result.appName)}</b> (${platformLabel}): ${result.newReviews} new review(s)\n`;
+        totalNew += result.newReviews;
+    }
+    message += totalNew === 0 ? '\n<i>No new reviews found.</i>' : `\n<i>Total: ${totalNew} new review(s)</i>`;
+    return message;
 }
 
 // Types
@@ -200,23 +219,7 @@ function registerCommands(bot: Telegraf<BotContext>): void {
                 return;
             }
 
-            let message = '✅ <b>Poll Complete</b>\n\n';
-            let totalNew = 0;
-
-            for (const result of results) {
-                const emoji = result.newReviews > 0 ? '🆕' : '📭';
-                const platformLabel = result.store === 'app_store' ? 'iOS' : 'Android';
-                message += `${emoji} <b>${escapeHtml(result.appName)}</b> (${platformLabel}): ${result.newReviews} new review(s)\n`;
-                totalNew += result.newReviews;
-            }
-
-            if (totalNew === 0) {
-                message += '\n<i>No new reviews found.</i>';
-            } else {
-                message += `\n<i>Total: ${totalNew} new review(s)</i>`;
-            }
-
-            await ctx.reply(message, { parse_mode: 'HTML' });
+            await ctx.reply(formatPollResults(results), { parse_mode: 'HTML' });
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
             logger.error('/poll error:', error);
