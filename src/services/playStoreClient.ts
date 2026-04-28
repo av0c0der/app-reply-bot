@@ -199,17 +199,17 @@ export class PlayStoreClient {
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-            // Check if it's an auth error
+            // Check if it's an auth/permission error
             if (
                 errorMessage.includes('401') ||
                 errorMessage.includes('403') ||
                 errorMessage.includes('PERMISSION_DENIED') ||
-                errorMessage.includes('UNAUTHENTICATED')
+                errorMessage.includes('UNAUTHENTICATED') ||
+                errorMessage.includes('does not have permission')
             ) {
-                logger.warn('Auth error detected, invalidating account', { accountId: account.id, errorMessage });
-                await supabase.invalidateAccount(account.id, errorMessage);
+                logger.warn('Auth/permission error detected', { accountId: account.id, packageName, errorMessage });
                 throw new Error(
-                    `Credentials are invalid: ${errorMessage}. Please re-upload your service account JSON file.`
+                    `Permission denied for ${packageName}: ${errorMessage}. Check that the service account has access to this app.`
                 );
             }
             throw error;

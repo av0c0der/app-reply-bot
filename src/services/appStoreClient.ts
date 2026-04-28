@@ -255,7 +255,7 @@ export class AppStoreClient {
 
         try {
             const response = await this.request<AppStoreVersionsResponse>(
-                `/apps/${storeId}/appStoreVersions?limit=1&sort=-versionString&fields[appStoreVersions]=appStoreState,versionString`,
+                `/apps/${storeId}/appStoreVersions?limit=1&fields[appStoreVersions]=appStoreState,versionString`,
                 token
             );
 
