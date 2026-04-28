@@ -6,6 +6,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { supabaseLogger as logger } from '../utils/logger';
+import { encrypt, decrypt, isEncrypted } from '../utils/encryption';
 
 // Types for our database schema
 export interface User {
@@ -143,6 +144,17 @@ class SupabaseService {
         logger.debug('Supabase client initialized', { url, schema: schemaName });
     }
 
+    /**
+     * Decrypt credential_data on an Account object (in-place, returns same ref).
+     * Handles both encrypted payloads and legacy plaintext gracefully.
+     */
+    private decryptAccount<T extends { credential_data: string }>(account: T): T {
+        if (account.credential_data && isEncrypted(account.credential_data)) {
+            account.credential_data = decrypt(account.credential_data);
+        }
+        return account;
+    }
+
     // ============================================================================
     // USER OPERATIONS
     // ============================================================================
@@ -267,11 +279,12 @@ class SupabaseService {
         appleIssuerId?: string
     ): Promise<string> {
         logger.debugDb('storeAccountCredential', 'accounts', { userId, accountType, name });
+        const encryptedData = encrypt(credentialData);
         const { data, error } = await this.client.rpc('store_account_credential', {
             p_user_id: userId,
             p_account_type: accountType,
             p_name: name,
-            p_credential_data: credentialData,
+            p_credential_data: encryptedData,
             p_apple_key_id: appleKeyId || null,
             p_apple_issuer_id: appleIssuerId || null,
         });
@@ -297,7 +310,7 @@ class SupabaseService {
             throw error;
         }
         logger.debug('getAccountsByUser result', { count: data?.length || 0 });
-        return (data || []) as Account[];
+        return ((data || []) as Account[]).map((a) => this.decryptAccount(a));
     }
 
     async getAccountById(accountId: string): Promise<Account | null> {
@@ -306,7 +319,7 @@ class SupabaseService {
             .select('*')
             .eq('id', accountId)
             .single();
-        return data as Account | null;
+        return data ? this.decryptAccount(data as Account) : null;
     }
 
     async getAccountByType(
@@ -321,7 +334,7 @@ class SupabaseService {
             .eq('account_type', accountType)
             .single();
         logger.debug('getAccountByType result', { found: !!data });
-        return data as Account | null;
+        return data ? this.decryptAccount(data as Account) : null;
     }
 
     async getAccountCredential(
@@ -335,7 +348,11 @@ class SupabaseService {
 
         if (error) throw error;
         const results = data as AccountCredentialData[] | null;
-        return results?.[0] || null;
+        const result = results?.[0] || null;
+        if (result && result.credential_data && isEncrypted(result.credential_data)) {
+            result.credential_data = decrypt(result.credential_data);
+        }
+        return result;
     }
 
     async invalidateAccount(accountId: string, errorMessage: string): Promise<void> {
@@ -475,6 +492,7 @@ class SupabaseService {
             .select('*, account:accounts(*)')
             .eq('id', appId)
             .single();
+        if (data?.account) this.decryptAccount(data.account);
         return data as AppWithAccount | null;
     }
 
@@ -521,6 +539,11 @@ class SupabaseService {
         const validApps = (data || []).filter(
             (app: AppWithAccount) => app.account?.is_valid
         );
+
+        // Decrypt credential data on each nested account
+        for (const app of validApps) {
+            if (app.account) this.decryptAccount(app.account);
+        }
 
         logger.debug('getAllActiveAppsWithAccounts result', {
             total: data?.length || 0,
